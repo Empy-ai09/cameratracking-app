@@ -1,0 +1,6 @@
+{
+	"appId": "com.retrolens.android",
+	"appName": "RetroLens Android",
+	"webDir": "dist",
+	"bundledWebRuntime": false
+}
