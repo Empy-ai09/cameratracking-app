@@ -7,7 +7,7 @@ import './ionic-init';
 
 const App: React.FC = () => (
   <IonApp>
-    <IonContent fullscreen>
+    <IonContent fullscreen style={{ '--background': '#000' } as React.CSSProperties}>
       <CameraPage />
     </IonContent>
   </IonApp>

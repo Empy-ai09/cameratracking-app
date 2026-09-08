@@ -48,7 +48,7 @@ export const CameraPage: React.FC = () => {
   const [status, setStatus] = useState('Menyiapkan kamera...');
   const [cameraReady, setCameraReady] = useState(false);
   const [nativeCameraActive, setNativeCameraActive] = useState(false);
-  const frameInterval = useRef<NodeJS.Timeout | null>(null);
+  const frameInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const latestFrame = useRef<HTMLImageElement | null>(null);
 
   useEffect(() => {
@@ -69,6 +69,9 @@ export const CameraPage: React.FC = () => {
           resultType: CameraResultType.DataUrl,
           allowEditing: false,
           saveToGallery: false,
+          width: 1280,
+          height: 720,
+          correctOrientation: true
         });
 
         if (photo.dataUrl) {
@@ -77,43 +80,65 @@ export const CameraPage: React.FC = () => {
           img.onload = () => {
             latestFrame.current = img;
             if (canvasRef.current) {
-              canvasRef.current.width = img.width;
-              canvasRef.current.height = img.height;
+              canvasRef.current.width = img.width || 1280;
+              canvasRef.current.height = img.height || 720;
+              setCameraReady(true);
+              setStatus('Kamera aktif');
               renderNative();
             }
           };
         }
       } catch (e) {
         console.error('[CameraPage] Native camera error', e);
+        setStatus('Kamera native gagal');
+        drawPlaceholder();
       }
-    }, 2000); // 2 seconds interval for native mode to avoid overhead
+    }, 2000);
   };
 
   const renderNative = () => {
-    if (!latestFrame.current || !canvasRef.current || !landmarker) return;
-    const ctx = canvasRef.current.getContext('2d');
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const img = latestFrame.current;
-    const startTimeMs = performance.now();
-    const results = landmarker.detect(img);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+    if (!latestFrame.current) {
+      drawPlaceholder();
+      return;
+    }
+
+    const img = latestFrame.current;
     ctx.save();
-    // Native photo is already correct orientation usually
-    ctx.drawImage(img, 0, 0, canvasRef.current.width, canvasRef.current.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     ctx.restore();
 
     applyFilter(ctx, FILTERS[filterIndex]);
 
-    if (results.landmarks) {
-      for (const landmarks of results.landmarks) {
-        drawHand(ctx, landmarks);
-        checkGestures(landmarks, results);
+    if (landmarker) {
+      try {
+        const results = landmarker.detect(img);
+        if (results.landmarks) {
+          for (const landmarks of results.landmarks) {
+            drawHand(ctx, landmarks);
+            checkGestures(landmarks, results);
+          }
+        }
+      } catch (e) {
+        console.error('[CameraPage] Native detect error', e);
       }
+    } else {
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
+      ctx.font = '18px sans-serif';
+      ctx.fillText('Kamera aktif, deteksi tangan dimuat nanti', 20, 40);
     }
   };
 
   useEffect(() => {
+    drawPlaceholder();
     async function init() {
       try {
         const vision = await FilesetResolver.forVisionTasks(
