@@ -1,7 +1,34 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { IonPage, IonContent, IonButton, IonIcon, IonFab, IonFabButton } from '@ionic/react';
-import { cameraOutline, reloadOutline, arrowBackOutline, arrowForwardOutline, cubeOutline, cameraReverseOutline } from 'ionicons/icons';
+import { IonPage, IonContent, IonButton, IonIcon } from '@ionic/react';
+import { cameraOutline, arrowBackOutline, arrowForwardOutline, cubeOutline } from 'ionicons/icons';
 import { HandLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
+
+const TWO_PI = Math.PI * 2;
+const GESTURE_COOLDOWN_MS = 900;
+const PINCH_DISTANCE = 0.055;
+const FIST_DISTANCE = 0.16;
+const BACKEND = '2d' as const;
+
+type Mode = '2D' | '3D';
+
+type Landmark = { x: number; y: number };
+
+type HandResult = {
+  landmarks?: Landmark[][];
+};
+
+const drawPixels = (ctx: CanvasRenderingContext2D, w: number, h: number, fn: (r: number, g: number, b: number, a: number) => [number, number, number, number]) => {
+  const image = ctx.getImageData(0, 0, w, h);
+  const { data } = image;
+  for (let i = 0; i < data.length; i += 4) {
+    const [r, g, b, a] = fn(data[i], data[i + 1], data[i + 2], data[i + 3]);
+    data[i] = r;
+    data[i + 1] = g;
+    data[i + 2] = b;
+    data[i + 3] = a;
+  }
+  ctx.putImageData(image, 0, 0);
+};
 
 const FILTERS = [
   'none', 'dual-tone', 'thermal', 'sketch', 'pixelate', 'glitch', 'invert', 'red-channel', 'edge', 'blur', 'cartoon', 'rainbow-wave'
@@ -14,6 +41,9 @@ export const CameraPage: React.FC = () => {
   const [is3DMode, setIs3DMode] = useState(false);
   const [landmarker, setLandmarker] = useState<HandLandmarker | null>(null);
   const requestRef = useRef<number>();
+  const lastGestureTime = useRef(0);
+  const fistState = useRef(false);
+  const [mode, setMode] = useState<Mode>('2D');
 
   useEffect(() => {
     async function init() {
@@ -51,7 +81,7 @@ export const CameraPage: React.FC = () => {
     }
   };
 
-  const drawHand = (ctx: CanvasRenderingContext2D, landmarks: any[]) => {
+  const drawHand = (ctx: CanvasRenderingContext2D, landmarks: Landmark[]) => {
     const canvas = canvasRef.current!;
     ctx.fillStyle = "#00FF00";
     landmarks.forEach(p => {
@@ -60,19 +90,28 @@ export const CameraPage: React.FC = () => {
       ctx.fill();
     });
 
-    // Portal Effect on Index Finger (8)
     const indexFinger = landmarks[8];
     const px = indexFinger.x * canvas.width;
     const py = indexFinger.y * canvas.height;
-    
-    ctx.beginPath();
-    ctx.strokeStyle = "cyan";
+    ctx.strokeStyle = 'cyan';
     ctx.lineWidth = 3;
-    ctx.arc(px, py, 40, 0, 2 * Math.PI);
-    ctx.stroke();
+    if (mode === '2D') {
+      ctx.beginPath();
+      ctx.moveTo(px, py - 42);
+      ctx.lineTo(px + 42, py);
+      ctx.lineTo(px, py + 42);
+      ctx.lineTo(px - 42, py);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(px - 42, py - 42);
+      ctx.lineTo(px + 42, py + 42);
+      ctx.moveTo(px + 42, py - 42);
+      ctx.lineTo(px - 42, py + 42);
+      ctx.stroke();
+    }
 
     if (mode === '3D') {
-      // Simple mesh effect
       ctx.beginPath();
       ctx.strokeStyle = "rgba(0, 255, 0, 0.5)";
       ctx.lineWidth = 1;
@@ -115,123 +154,121 @@ export const CameraPage: React.FC = () => {
     requestRef.current = requestAnimationFrame(render);
   };
 
-  const lastGestureTime = useRef(0);
-  const [mode, setMode] = useState<'2D' | '3D'>('2D');
-
   const applyFilter = (ctx: CanvasRenderingContext2D, name: string) => {
     const canvas = canvasRef.current!;
-    const w = canvas.width;
-    const h = canvas.height;
+    const { width: w, height: h } = canvas;
+    if (name === 'none') return;
 
-    switch (name) {
-      case 'dual-tone':
-        ctx.globalCompositeOperation = 'source-atop';
-        ctx.fillStyle = 'rgba(255, 0, 255, 0.3)';
-        ctx.fillRect(0, 0, w, h);
-        ctx.fillStyle = 'rgba(0, 255, 255, 0.3)';
-        ctx.fillRect(0, 0, w, h);
-        ctx.globalCompositeOperation = 'source-over';
-        break;
-      case 'thermal':
-        const thermalData = ctx.getImageData(0, 0, w, h);
-        for (let i = 0; i < thermalData.data.length; i += 4) {
-          const avg = (thermalData.data[i] + thermalData.data[i + 1] + thermalData.data[i + 2]) / 3;
-          thermalData.data[i] = avg > 128 ? 255 : avg * 2;
-          thermalData.data[i + 1] = 255 - avg;
-          thermalData.data[i + 2] = 255 - avg > 128 ? 0 : 255;
-        }
-        ctx.putImageData(thermalData, 0, 0);
-        break;
-      case 'sketch':
-        ctx.filter = 'grayscale(100%) contrast(500%) invert(100%)';
-        ctx.drawImage(canvas, 0, 0);
-        ctx.filter = 'none';
-        break;
-      case 'pixelate':
-        const size = 10;
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = w / size;
-        tempCanvas.height = h / size;
-        const tempCtx = tempCanvas.getContext('2d')!;
-        tempCtx.drawImage(canvas, 0, 0, tempCanvas.width, tempCanvas.height);
-        ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(tempCanvas, 0, 0, w, h);
-        break;
-      case 'glitch':
-        for (let i = 0; i < 5; i++) {
-          const x = Math.random() * w;
-          const y = Math.random() * h;
-          const sliceW = Math.random() * w * 0.2;
-          const sliceH = Math.random() * 20;
-          ctx.drawImage(canvas, x, y, sliceW, sliceH, x + (Math.random() - 0.5) * 20, y, sliceW, sliceH);
-        }
-        break;
-      case 'invert':
-        ctx.globalCompositeOperation = 'difference';
-        ctx.fillStyle = 'white';
-        ctx.fillRect(0, 0, w, h);
-        ctx.globalCompositeOperation = 'source-over';
-        break;
-      case 'red-channel':
-        const rData = ctx.getImageData(0, 0, w, h);
-        for (let i = 0; i < rData.data.length; i += 4) {
-          rData.data[i + 1] = 0;
-          rData.data[i + 2] = 0;
-        }
-        ctx.putImageData(rData, 0, 0);
-        break;
-      case 'edge':
-        ctx.filter = 'contrast(1000%) grayscale(100%) invert(100%)';
-        ctx.drawImage(canvas, 0, 0);
-        ctx.filter = 'none';
-        break;
-      case 'blur':
-        ctx.filter = 'blur(5px)';
-        ctx.drawImage(canvas, 0, 0);
-        ctx.filter = 'none';
-        break;
-      case 'cartoon':
-        ctx.filter = 'contrast(150%) saturate(200%)';
-        ctx.drawImage(canvas, 0, 0);
-        ctx.filter = 'none';
-        break;
-      case 'rainbow-wave':
-        ctx.globalCompositeOperation = 'hue';
-        ctx.fillStyle = `hsl(${(Date.now() / 10) % 360}, 100%, 50%)`;
-        ctx.fillRect(0, 0, w, h);
-        ctx.globalCompositeOperation = 'source-over';
-        break;
+    if (name === 'dual-tone') drawPixels(ctx, w, h, (r, g, b, a) => {
+      const l = (r + g + b) / 765;
+      return l > 0.5 ? [255, 191, 0, a] : [19, 65, 160, a];
+    });
+    if (name === 'thermal') drawPixels(ctx, w, h, (r, g, b, a) => {
+      const l = (r + g + b) / 765;
+      const red = Math.min(255, l * 510);
+      const green = Math.min(255, Math.max(0, (l - 0.25) * 510));
+      const blue = Math.min(255, Math.max(0, (0.5 - l) * 510));
+      return [red, green, blue, a];
+    });
+    if (name === 'sketch' || name === 'edge') {
+      const source = ctx.getImageData(0, 0, w, h);
+      const output = ctx.createImageData(w, h);
+      for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+        const i = (y * w + x) * 4;
+        const lum = (offset: number) => (source.data[i + offset] + source.data[i + offset + 1] + source.data[i + offset + 2]) / 3;
+        const gx = lum(4) - lum(-4);
+        const gy = lum(w * 4) - lum(-w * 4);
+        const value = name === 'sketch' ? 255 - Math.min(255, Math.hypot(gx, gy) * 1.8) : Math.min(255, Math.hypot(gx, gy) * 2.5);
+        output.data[i] = value;
+        output.data[i + 1] = value;
+        output.data[i + 2] = value;
+        output.data[i + 3] = 255;
+      }
+      ctx.putImageData(output, 0, 0);
+    }
+    if (name === 'pixelate') {
+      const size = 12;
+      const small = document.createElement('canvas');
+      small.width = Math.ceil(w / size);
+      small.height = Math.ceil(h / size);
+      small.getContext(BACKEND)!.drawImage(canvas, 0, 0, small.width, small.height);
+      ctx.save();
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(small, 0, 0, w, h);
+      ctx.restore();
+    }
+    if (name === 'glitch') {
+      for (let i = 0; i < 9; i++) {
+        const y = Math.random() * h;
+        const slice = 4 + Math.random() * 20;
+        ctx.drawImage(canvas, 0, y, w, slice, (Math.random() - 0.5) * 42, y, w, slice);
+      }
+      ctx.globalCompositeOperation = 'screen';
+      ctx.fillStyle = 'rgba(255, 0, 80, 0.14)';
+      ctx.fillRect(0, 0, w, h);
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    if (name === 'invert') drawPixels(ctx, w, h, (r, g, b, a) => [255 - r, 255 - g, 255 - b, a]);
+    if (name === 'red-channel') drawPixels(ctx, w, h, (r, _g, _b, a) => [r, 0, 0, a]);
+    if (name === 'blur') {
+      const copy = document.createElement('canvas');
+      copy.width = w;
+      copy.height = h;
+      copy.getContext(BACKEND)!.drawImage(canvas, 0, 0);
+      ctx.save();
+      ctx.filter = 'blur(6px)';
+      ctx.drawImage(copy, 0, 0);
+      ctx.restore();
+    }
+    if (name === 'cartoon') drawPixels(ctx, w, h, (r, g, b, a) => [
+      Math.round(r / 64) * 64,
+      Math.round(g / 64) * 64,
+      Math.round(b / 64) * 64,
+      a
+    ]);
+    if (name === 'rainbow-wave') {
+      const copy = document.createElement('canvas');
+      copy.width = w;
+      copy.height = h;
+      copy.getContext(BACKEND)!.drawImage(canvas, 0, 0);
+      const t = performance.now() / 450;
+      ctx.clearRect(0, 0, w, h);
+      for (let y = 0; y < h; y += 4) {
+        const shift = Math.sin(y / 32 + t) * 12;
+        ctx.drawImage(copy, 0, y, w, 4, shift, y, w, 4);
+      }
+      ctx.globalCompositeOperation = 'hue';
+      ctx.fillStyle = `hsl(${(t * 50) % 360} 100% 55%)`;
+      ctx.fillRect(0, 0, w, h);
+      ctx.globalCompositeOperation = 'source-over';
     }
   };
 
-  const checkGestures = (landmarks: any[], results: any) => {
-    const now = Date.now();
-    if (now - lastGestureTime.current < 1000) return;
+  const isFist = (landmarks: Landmark[]) => [8, 12, 16, 20].every((tip) => {
+    const wrist = landmarks[0];
+    return Math.hypot(landmarks[tip].x - wrist.x, landmarks[tip].y - wrist.y) < FIST_DISTANCE;
+  });
 
-    // Gesture Pinch: Thumb (4) + Pinky (20)
-    const thumb = landmarks[4];
-    const pinky = landmarks[20];
-    const dist = Math.hypot(thumb.x - pinky.x, thumb.y - pinky.y);
-    
-    if (dist < 0.05) {
-      setFilterIndex((prev) => (prev + 1) % FILTERS.length);
+  const checkGestures = (landmarks: Landmark[], results: HandResult) => {
+    const now = performance.now();
+    if (now - lastGestureTime.current < GESTURE_COOLDOWN_MS) return;
+    const pinch = Math.hypot(landmarks[4].x - landmarks[20].x, landmarks[4].y - landmarks[20].y) < PINCH_DISTANCE;
+    if (pinch) {
+      setFilterIndex((current) => (current + 1) % FILTERS.length);
       lastGestureTime.current = now;
       return;
     }
-
-    // Toggle 2D/3D: Both hands fist
-    if (results.landmarks.length === 2) {
-      const isFist = (l: any[]) => {
-        const fingerTips = [8, 12, 16, 20];
-        const wrist = l[0];
-        return fingerTips.every(tip => Math.hypot(l[tip].x - wrist.x, l[tip].y - wrist.y) < 0.15);
-      };
-      if (isFist(results.landmarks[0]) && isFist(results.landmarks[1])) {
-        setIs3DMode(prev => !prev);
-        setMode(prev => prev === '2D' ? '3D' : '2D');
-        lastGestureTime.current = now;
-      }
+    const hands = results.landmarks ?? [];
+    const bothFists = hands.length === 2 && hands.every(isFist);
+    if (bothFists && !fistState.current) {
+      setMode((current) => {
+        const next = current === '2D' ? '3D' : '2D';
+        setIs3DMode(next === '3D');
+        return next;
+      });
+      lastGestureTime.current = now;
     }
+    fistState.current = bothFists;
   };
 
   const takeScreenshot = () => {
