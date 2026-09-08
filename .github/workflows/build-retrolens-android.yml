@@ -1,0 +1,65 @@
+name: Build RetroLens Android
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        working-directory: RetroLens-Android
+        run: |
+          npm install
+
+      - name: Build web
+        working-directory: RetroLens-Android
+        run: |
+          npm run build
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Install Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Capacitor sync Android
+        working-directory: RetroLens-Android
+        run: |
+          npx cap add android || echo "android already added"
+          npm run sync
+
+      - name: Build APK debug
+        working-directory: RetroLens-Android/android
+        run: |
+          ./gradlew assembleDebug
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: retrolens-android-apk
+          path: RetroLens-Android/android/app/build/outputs/apk/debug/*.apk
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          files: RetroLens-Android/android/app/build/outputs/apk/debug/*.apk

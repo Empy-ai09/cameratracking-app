@@ -1,23 +1,13 @@
-# Python
-__pycache__/
-*.pyc
-*.pyo
-.Python
-venv/
-env/
-*.egg-info/
-
-# Screenshot & output hasil testing
-cap_*.png
-portal_screenshot_*.png
-*.png
-!demo.png
-!screenshot-demo.png
-
-# OS junk
+node_modules/
+android/
+ios/
+dist/
+.build/
 .DS_Store
-Thumbs.db
-
-# Editor
-.vscode/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 .idea/
+.vscode/
+.env.local
+.env.*
