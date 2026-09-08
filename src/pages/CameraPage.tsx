@@ -47,15 +47,19 @@ export const CameraPage: React.FC = () => {
 
   useEffect(() => {
     async function init() {
-      const vision = await FilesetResolver.forVisionTasks(
-        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
-      );
-      const hl = await HandLandmarker.createFromOptions(vision, {
-        baseOptions: { modelAssetPath: "/hand_landmarker.task", delegate: "GPU" },
-        runningMode: "VIDEO",
-        numHands: 2
-      });
-      setLandmarker(hl);
+      try {
+        const vision = await FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+        );
+        const hl = await HandLandmarker.createFromOptions(vision, {
+          baseOptions: { modelAssetPath: "hand_landmarker.task", delegate: "GPU" },
+          runningMode: "VIDEO",
+          numHands: 2
+        });
+        setLandmarker(hl);
+      } catch (e) {
+        console.error("Failed to load hand landmarker", e);
+      }
       startCamera();
     }
     init();
@@ -63,21 +67,25 @@ export const CameraPage: React.FC = () => {
   }, []);
 
   const startCamera = async () => {
-    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: 1280, height: 720 }
-      });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
-        videoRef.current.onloadeddata = () => {
-          if (canvasRef.current && videoRef.current) {
-            canvasRef.current.width = videoRef.current.videoWidth;
-            canvasRef.current.height = videoRef.current.videoHeight;
-            render();
-          }
-        };
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } }
+        });
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play();
+          videoRef.current.onloadeddata = () => {
+            if (canvasRef.current && videoRef.current) {
+              canvasRef.current.width = videoRef.current.videoWidth || 640;
+              canvasRef.current.height = videoRef.current.videoHeight || 480;
+              render();
+            }
+          };
+        }
       }
+    } catch (err) {
+      console.error("Camera access error:", err);
     }
   };
 
