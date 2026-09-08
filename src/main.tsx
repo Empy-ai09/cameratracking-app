@@ -13,4 +13,13 @@ const App: React.FC = () => (
   </IonApp>
 );
 
+if (typeof window !== 'undefined') {
+  window.addEventListener('error', (event) => {
+    console.error('window error', event.error ?? event.message);
+  });
+  window.addEventListener('unhandledrejection', (event) => {
+    console.error('unhandledrejection', event.reason);
+  });
+}
+
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(<App />);

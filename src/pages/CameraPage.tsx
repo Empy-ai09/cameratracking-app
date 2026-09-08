@@ -44,6 +44,8 @@ export const CameraPage: React.FC = () => {
   const lastGestureTime = useRef(0);
   const fistState = useRef(false);
   const [mode, setMode] = useState<Mode>('2D');
+  const [status, setStatus] = useState('Menyiapkan kamera...');
+  const [cameraReady, setCameraReady] = useState(false);
 
   useEffect(() => {
     async function init() {
@@ -59,8 +61,9 @@ export const CameraPage: React.FC = () => {
         setLandmarker(hl);
       } catch (e) {
         console.error("Failed to load hand landmarker", e);
+        setStatus('MediaPipe gagal dimuat');
       }
-      startCamera();
+      await startCamera();
     }
     init();
     return () => { if (requestRef.current) cancelAnimationFrame(requestRef.current); };
@@ -68,25 +71,49 @@ export const CameraPage: React.FC = () => {
 
   const startCamera = async () => {
     try {
-      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } }
-        });
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.play();
-          videoRef.current.onloadeddata = () => {
-            if (canvasRef.current && videoRef.current) {
-              canvasRef.current.width = videoRef.current.videoWidth || 640;
-              canvasRef.current.height = videoRef.current.videoHeight || 480;
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setStatus('Browser tidak mendukung kamera');
+        return;
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }
+      });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+        videoRef.current.onloadeddata = () => {
+          if (canvasRef.current && videoRef.current) {
+            canvasRef.current.width = videoRef.current.videoWidth || 640;
+            canvasRef.current.height = videoRef.current.videoHeight || 480;
+            setCameraReady(true);
+            setStatus('Kamera aktif');
+            if (!landmarker) {
+              drawPlaceholder();
+            } else {
               render();
             }
-          };
-        }
+          }
+        };
       }
     } catch (err) {
-      console.error("Camera access error:", err);
+      console.error('Camera access error:', err);
+      setStatus('Izin kamera ditolak / gagal');
+      drawPlaceholder();
     }
+  };
+
+  const drawPlaceholder = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#111';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#fff';
+    ctx.font = '20px sans-serif';
+    ctx.fillText('Camera belum aktif', 20, 40);
+    ctx.fillText(status, 20, 72);
   };
 
   const drawHand = (ctx: CanvasRenderingContext2D, landmarks: Landmark[]) => {
@@ -137,7 +164,10 @@ export const CameraPage: React.FC = () => {
   };
 
   const render = () => {
-    if (!videoRef.current || !canvasRef.current || !landmarker) return;
+    if (!videoRef.current || !canvasRef.current || !landmarker) {
+      drawPlaceholder();
+      return;
+    }
     const ctx = canvasRef.current.getContext('2d');
     if (!ctx) return;
 
@@ -293,6 +323,7 @@ export const CameraPage: React.FC = () => {
         <div id="camera-container">
           <video ref={videoRef} id="video" playsInline muted style={{ display: 'none' }}></video>
           <canvas ref={canvasRef} id="canvas"></canvas>
+          <div className="status-badge">{status}</div>
           <div className="ui-buttons">
             <IonButton onClick={() => setFilterIndex((prev) => (prev - 1 + FILTERS.length) % FILTERS.length)}>
               <IonIcon icon={arrowBackOutline} />
