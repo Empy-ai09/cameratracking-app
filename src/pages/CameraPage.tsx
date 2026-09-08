@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { IonPage, IonContent, IonButton, IonIcon } from '@ionic/react';
 import { cameraOutline, arrowBackOutline, arrowForwardOutline, cubeOutline } from 'ionicons/icons';
 import { HandLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
+import { Camera, CameraResultType } from '@capacitor/camera';
 
 const TWO_PI = Math.PI * 2;
 const GESTURE_COOLDOWN_MS = 900;
@@ -46,6 +47,71 @@ export const CameraPage: React.FC = () => {
   const [mode, setMode] = useState<Mode>('2D');
   const [status, setStatus] = useState('Menyiapkan kamera...');
   const [cameraReady, setCameraReady] = useState(false);
+  const [nativeCameraActive, setNativeCameraActive] = useState(false);
+  const frameInterval = useRef<NodeJS.Timeout | null>(null);
+  const latestFrame = useRef<HTMLImageElement | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (frameInterval.current) clearInterval(frameInterval.current);
+    };
+  }, []);
+
+  const startNativeCamera = async () => {
+    console.log('[CameraPage] startNativeCamera called');
+    setNativeCameraActive(true);
+    setStatus('Menggunakan kamera native (snapshot)');
+    
+    frameInterval.current = setInterval(async () => {
+      try {
+        const photo = await Camera.getPhoto({
+          quality: 50,
+          resultType: CameraResultType.DataUrl,
+          allowEditing: false,
+          saveToGallery: false,
+        });
+
+        if (photo.dataUrl) {
+          const img = new Image();
+          img.src = photo.dataUrl;
+          img.onload = () => {
+            latestFrame.current = img;
+            if (canvasRef.current) {
+              canvasRef.current.width = img.width;
+              canvasRef.current.height = img.height;
+              renderNative();
+            }
+          };
+        }
+      } catch (e) {
+        console.error('[CameraPage] Native camera error', e);
+      }
+    }, 2000); // 2 seconds interval for native mode to avoid overhead
+  };
+
+  const renderNative = () => {
+    if (!latestFrame.current || !canvasRef.current || !landmarker) return;
+    const ctx = canvasRef.current.getContext('2d');
+    if (!ctx) return;
+
+    const img = latestFrame.current;
+    const startTimeMs = performance.now();
+    const results = landmarker.detect(img);
+
+    ctx.save();
+    // Native photo is already correct orientation usually
+    ctx.drawImage(img, 0, 0, canvasRef.current.width, canvasRef.current.height);
+    ctx.restore();
+
+    applyFilter(ctx, FILTERS[filterIndex]);
+
+    if (results.landmarks) {
+      for (const landmarks of results.landmarks) {
+        drawHand(ctx, landmarks);
+        checkGestures(landmarks, results);
+      }
+    }
+  };
 
   useEffect(() => {
     async function init() {
@@ -70,18 +136,25 @@ export const CameraPage: React.FC = () => {
   }, []);
 
   const startCamera = async () => {
+    console.log('[CameraPage] startCamera called');
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
+        console.log('[CameraPage] navigator.mediaDevices.getUserMedia not available');
         setStatus('Browser tidak mendukung kamera');
+        // fallback to native camera capture
+        await startNativeCamera();
         return;
       }
+      console.log('[CameraPage] Requesting camera access');
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }
       });
+      console.log('[CameraPage] Camera stream obtained');
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
         videoRef.current.onloadeddata = () => {
+          console.log('[CameraPage] Video loaded data');
           if (canvasRef.current && videoRef.current) {
             canvasRef.current.width = videoRef.current.videoWidth || 640;
             canvasRef.current.height = videoRef.current.videoHeight || 480;
@@ -94,11 +167,18 @@ export const CameraPage: React.FC = () => {
             }
           }
         };
+        videoRef.current.onerror = (e) => {
+          console.error('[CameraPage] Video error', e);
+          setStatus('Video error');
+          // fallback to native camera
+          startNativeCamera();
+        };
       }
     } catch (err) {
-      console.error('Camera access error:', err);
+      console.error('[CameraPage] Camera access error:', err);
       setStatus('Izin kamera ditolak / gagal');
-      drawPlaceholder();
+      // fallback to native camera
+      startNativeCamera();
     }
   };
 
